@@ -1,0 +1,41 @@
+{
+  "cSpell.words": [
+    "alloc",
+    "Antialiasing",
+    "ARGB",
+    "bgra",
+    "cmap",
+    "cmaps",
+    "Cupertino",
+    "dont",
+    "endtemplate",
+    "impls",
+    "jclass",
+    "jlong",
+    "JNICALL",
+    "JNIEXPORT",
+    "jobject",
+    "jsify",
+    "lerp",
+    "listenables",
+    "LTRB",
+    "LTWH",
+    "microtask",
+    "Pdfjs",
+    "pubspec",
+    "rects",
+    "reentrantly",
+    "relayout",
+    "Rgba",
+    "Schyler",
+    "scrollable",
+    "sqlite",
+    "Subrect",
+    "unawaited",
+    "unregister",
+    "vsync"
+  ],
+  "editor.codeActionsOnSave": {
+    "source.fixAll": true
+  }
+}
