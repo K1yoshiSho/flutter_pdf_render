@@ -1,272 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:vector_math/vector_math_64.dart' as math64;
-
+import 'package:dio/dio.dart';
 import 'pdf_render.dart';
 import 'src/wrappers/pdf_texture.dart';
-
-/// Function definition to build widget tree for a PDF document.
-///
-/// [pdfDocument] is the PDF document and it is valid until the corresponding
-/// [PdfDocumentLoader] is in the widget tree. It may be null.
-/// [pageCount] indicates the number of pages in it.
-typedef PdfDocumentBuilder = Widget Function(BuildContext context, PdfDocument? pdfDocument, int pageCount);
-
-/// Function definition to build widget tree corresponding to a PDF page.
-///
-/// The function used to decorate the rendered PDF page with certain border and/or shadow
-/// and sometimes add page number on it.
-/// The second parameter [pageSize] is the original page size in pt.
-/// You can determine the final page size shown in the flutter UI using the size
-/// and then pass the size to [textureBuilder] function on the third parameter,
-/// which generates the final [Widget].
-typedef PdfPageBuilder = Widget Function(BuildContext context, PdfPageTextureBuilder textureBuilder, Size pageSize);
-
-/// Function definition to generate the actual widget that contains rendered PDF page image.
-///
-/// [size] should be the page widget size but it can be null if you don't want to calculate it.
-/// Unlike the function name, it may generate widget other than [Texture].
-/// the function generates a placeholder [Container] for the unavailable page image.
-/// Anyway, please note that the size is in screen coordinates; not the actual pixel size of
-/// the image. In other words, the function correctly deals with the screen pixel density automatically.
-/// [backgroundFill] specifies whether to fill background before rendering actual page content or not.
-/// The page content may not have background fill and if the flag is false, it may be rendered with transparent
-/// background.
-/// [allowAntialiasingIOS] specifies whether to allow use of antialiasing on iOS Quartz PDF rendering
-/// [renderingPixelRatio] specifies pixel density for rendering page image. If it is null, the value is obtained by
-/// calling `MediaQuery.of(context).devicePixelRatio`.
-/// Please note that on iOS Simulator, it always use non-[Texture] rendering pass.
-typedef PdfPageTextureBuilder = Widget Function(
-    {Size? size,
-    PdfPagePlaceholderBuilder? placeholderBuilder,
-    bool backgroundFill,
-    bool allowAntialiasingIOS,
-    double? renderingPixelRatio});
-
-/// Creates page placeholder that is shown on page loading or even page load failure.
-typedef PdfPagePlaceholderBuilder = Widget Function(Size size, PdfPageStatus status);
-
-/// Page loading status.
-enum PdfPageStatus {
-  /// The page is currently being loaded.
-  loading,
-
-  /// The page load failed.
-  loadFailed,
-}
-
-/// Error handler.
-typedef OnError = void Function(dynamic);
-
-/// Exception-proof await/cache mechanism on [PdfDocument] Future.
-class _PdfDocumentAwaiter {
-  _PdfDocumentAwaiter(this._docFuture, {this.onError});
-
-  final FutureOr<PdfDocument> _docFuture;
-  final OnError? onError;
-  PdfDocument? _cached;
-
-  Future<PdfDocument?> getValue() async {
-    if (_cached == null) {
-      try {
-        _cached = await _docFuture;
-      } catch (e) {
-        onError?.call(e);
-      }
-    }
-    return _cached;
-  }
-}
-
-/// [PdfDocumentLoader] is a [Widget] that used to load arbitrary PDF document and manages [PdfDocument] instance.
-class PdfDocumentLoader extends StatefulWidget {
-  final FutureOr<PdfDocument> doc;
-
-  /// Function to build widget tree corresponding to PDF document.
-  final PdfDocumentBuilder? documentBuilder;
-
-  /// Page number of the page to render if only one page should be shown.
-  ///
-  /// Could not be used with [documentBuilder].
-  /// If you want to show multiple pages in the widget tree, use [PdfPageView].
-  final int? pageNumber;
-
-  /// Function to build page widget tree.
-  ///
-  /// It can be null if you don't want to render the page with the widget or use the default page builder.
-  final PdfPageBuilder? pageBuilder;
-
-  /// Error callback
-  final Function(dynamic)? onError;
-
-  /// Load PDF document from file.
-  ///
-  /// For additional parameters, see [PdfDocumentLoader].
-  factory PdfDocumentLoader.openFile(
-    String filePath, {
-    Key? key,
-    PdfDocumentBuilder? documentBuilder,
-    int? pageNumber,
-    PdfPageBuilder? pageBuilder,
-    Function(dynamic)? onError,
-  }) =>
-      PdfDocumentLoader(
-        key: key,
-        doc: PdfDocument.openFile(filePath),
-        documentBuilder: documentBuilder,
-        pageNumber: pageNumber,
-        pageBuilder: pageBuilder,
-        onError: onError,
-      );
-
-  /// Load PDF document from asset.
-  ///
-  /// For additional parameters, see [PdfDocumentLoader].
-  factory PdfDocumentLoader.openAsset(
-    String assetName, {
-    Key? key,
-    PdfDocumentBuilder? documentBuilder,
-    int? pageNumber,
-    PdfPageBuilder? pageBuilder,
-    Function(dynamic)? onError,
-  }) =>
-      PdfDocumentLoader(
-        key: key,
-        doc: PdfDocument.openAsset(assetName),
-        documentBuilder: documentBuilder,
-        pageNumber: pageNumber,
-        pageBuilder: pageBuilder,
-        onError: onError,
-      );
-
-  /// Load PDF document from PDF binary data.
-  ///
-  /// For additional parameters, see [PdfDocumentLoader].
-  factory PdfDocumentLoader.openData(
-    Uint8List data, {
-    Key? key,
-    PdfDocumentBuilder? documentBuilder,
-    int? pageNumber,
-    PdfPageBuilder? pageBuilder,
-    Function(dynamic)? onError,
-  }) =>
-      PdfDocumentLoader(
-        key: key,
-        doc: PdfDocument.openData(data),
-        documentBuilder: documentBuilder,
-        pageNumber: pageNumber,
-        pageBuilder: pageBuilder,
-        onError: onError,
-      );
-
-  /// Use one of [PdfDocumentLoader.openFile], [PdfDocumentLoader.openAsset],
-  /// or [PdfDocumentLoader.openData] in normal case.
-  /// If you already have [PdfDocument], you can use the method.
-  PdfDocumentLoader({
-    Key? key,
-    required this.doc,
-    this.documentBuilder,
-    this.pageNumber,
-    this.pageBuilder,
-    this.onError,
-  }) : super(key: key);
-
-  @override
-  PdfDocumentLoaderState createState() => PdfDocumentLoaderState();
-
-  /// Error-safe wrapper on [doc].
-  late final _docCache = _PdfDocumentAwaiter(doc, onError: onError);
-}
-
-class PdfDocumentLoaderState extends State<PdfDocumentLoader> {
-  PdfDocument? _doc;
-
-  /// _lastPageSize is important to keep consistency on uniform page size on
-  /// a PDF document.
-  Size? _lastPageSize;
-  List<Size?>? _cachedPageSizes;
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-  }
-
-  void _setPageSize(int pageNumber, Size? size) {
-    _lastPageSize = size;
-    if (pageNumber > 0 && pageNumber <= _doc!.pageCount) {
-      if (_cachedPageSizes == null || _cachedPageSizes?.length != _doc!.pageCount) {
-        _cachedPageSizes = List<Size?>.filled(_doc!.pageCount, null);
-      }
-      _cachedPageSizes![pageNumber - 1] = size;
-    }
-  }
-
-  Size? _getPageSize(int? pageNumber) {
-    Size? size;
-    if (_cachedPageSizes != null && pageNumber! > 0 && pageNumber <= _cachedPageSizes!.length) {
-      size = _cachedPageSizes![pageNumber - 1];
-    }
-    size ??= _lastPageSize;
-    return size;
-  }
-
-  @override
-  void didUpdateWidget(PdfDocumentLoader oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _updateDoc();
-  }
-
-  Future<void> _updateDoc() async {
-    final newDoc = await widget._docCache.getValue();
-    if (newDoc != _doc) {
-      _release();
-      _init();
-    }
-  }
-
-  @override
-  void dispose() {
-    _release();
-    super.dispose();
-  }
-
-  Future<void> _init() async {
-    try {
-      _doc = await widget._docCache.getValue();
-      if (_doc == null) {
-        widget.onError?.call(ArgumentError('Cannot open the document'));
-      }
-    } catch (e) {
-      _doc = null;
-      widget.onError?.call(e);
-    }
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  void _release() {
-    _doc?.dispose();
-    _doc = null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return widget.pageNumber != null
-        ? PdfPageView(
-            pdfDocument: _doc,
-            pageNumber: widget.pageNumber,
-            pageBuilder: widget.pageBuilder,
-          )
-        : widget.documentBuilder != null
-            ? widget.documentBuilder!(context, _doc, _doc?.pageCount ?? 0)
-            : Container();
-  }
-}
 
 /// Widget to render a page of PDF document. Normally used in combination with [PdfDocumentLoader].
 class PdfPageView extends StatefulWidget {
@@ -468,8 +210,6 @@ class PdfViewerController extends TransformationController {
   PdfViewerController();
 
   /// Associated [PdfViewerState].
-  ///
-  /// FIXME: I don't think this is a good structure for our purpose...
   PdfViewerState? _state;
 
   /// Associate a [PdfViewerState] to the controller.
@@ -723,13 +463,6 @@ class PdfViewerParams {
   final PanAxis panAxis;
 
   /// See [InteractiveViewer] for more info.
-  @Deprecated(
-    'Use panAxis instead. '
-    'This feature was deprecated after flutter sdk v3.3.0-0.5.pre.',
-  )
-  final bool alignPanAxis;
-
-  /// See [InteractiveViewer] for more info.
   final EdgeInsets boundaryMargin;
 
   /// See [InteractiveViewer] for more info.
@@ -778,7 +511,6 @@ class PdfViewerParams {
       this.pageDecoration,
       this.scrollDirection = Axis.vertical,
       this.panAxis = PanAxis.free,
-      this.alignPanAxis = false,
       this.boundaryMargin = EdgeInsets.zero,
       this.maxScale = 20,
       this.minScale = 0.1,
@@ -800,7 +532,6 @@ class PdfViewerParams {
     BoxDecoration? pageDecoration,
     Axis? scrollDirection,
     PanAxis? panAxis,
-    bool? alignPanAxis,
     EdgeInsets? boundaryMargin,
     bool? panEnabled,
     bool? scaleEnabled,
@@ -820,7 +551,6 @@ class PdfViewerParams {
         pageDecoration: pageDecoration ?? this.pageDecoration,
         scrollDirection: scrollDirection ?? this.scrollDirection,
         panAxis: panAxis ?? this.panAxis,
-        alignPanAxis: alignPanAxis ?? this.alignPanAxis,
         boundaryMargin: boundaryMargin ?? this.boundaryMargin,
         panEnabled: panEnabled ?? this.panEnabled,
         scaleEnabled: scaleEnabled ?? this.scaleEnabled,
@@ -845,7 +575,6 @@ class PdfViewerParams {
         other.pageDecoration == pageDecoration &&
         other.scrollDirection == scrollDirection &&
         other.panAxis == panAxis &&
-        other.alignPanAxis == alignPanAxis &&
         other.boundaryMargin == boundaryMargin &&
         other.panEnabled == panEnabled &&
         other.scaleEnabled == scaleEnabled &&
@@ -867,7 +596,6 @@ class PdfViewerParams {
         pageDecoration.hashCode ^
         scrollDirection.hashCode ^
         panAxis.hashCode ^
-        alignPanAxis.hashCode ^
         boundaryMargin.hashCode ^
         panEnabled.hashCode ^
         scaleEnabled.hashCode ^
@@ -910,6 +638,36 @@ class PdfImageViewer extends StatefulWidget {
     required this.images,
   }) : super(key: key);
 
+  static Future<File> returnFileFromUrl({required String url, String fileName = 'temp'}) async {
+    final Directory tempDir = await getApplicationDocumentsDirectory();
+    final File file = File('${tempDir.path}/$fileName.pdf');
+    final Response response = await Dio().get(
+      url,
+      options: Options(
+        responseType: ResponseType.bytes,
+        followRedirects: false,
+        validateStatus: (status) => status != null && status < 500,
+      ),
+    );
+    await file.writeAsBytes(response.data, flush: true);
+    return file;
+  }
+
+  static Future<List<ui.Image>> returnListOfImages(File filePath) async {
+    final PdfDocument doc = await PdfDocument.openFile(filePath.path);
+    final List<ui.Image> images = <ui.Image>[];
+
+    for (var i = 1; i <= doc.pageCount; i++) {
+      final PdfPage page = await doc.getPage(i);
+      final PdfPageImage pageImage = await page.render();
+      final ui.Image image = await pageImage.createImageDetached();
+
+      images.add(image);
+    }
+
+    return images;
+  }
+
   /// Open a file.
   factory PdfImageViewer.openFile(
     String filePath, {
@@ -917,7 +675,7 @@ class PdfImageViewer extends StatefulWidget {
     PdfViewerController? viewerController,
     PdfViewerParams? params,
     OnError? onError,
-    List<ui.Image>? images,
+    required List<ui.Image>? images,
   }) =>
       PdfImageViewer(
         key: key,
@@ -935,7 +693,7 @@ class PdfImageViewer extends StatefulWidget {
     PdfViewerController? viewerController,
     PdfViewerParams? params,
     OnError? onError,
-    List<ui.Image>? images,
+    required List<ui.Image>? images,
   }) =>
       PdfImageViewer(
         key: key,
@@ -953,7 +711,7 @@ class PdfImageViewer extends StatefulWidget {
     PdfViewerController? viewerController,
     PdfViewerParams? params,
     OnError? onError,
-    List<ui.Image>? images,
+    required List<ui.Image>? images,
   }) =>
       PdfImageViewer(
         key: key,
@@ -968,12 +726,12 @@ class PdfImageViewer extends StatefulWidget {
   static Widget openFutureFile(
     Future<String> Function() getFilePath, {
     Key? key,
-    PdfViewerController? viewerController,
-    PdfViewerParams? params,
+    required PdfViewerController? viewerController,
+    required PdfViewerParams? params,
     OnError? onError,
     Widget Function(BuildContext)? loadingBannerBuilder,
     PdfDocument? docFallback,
-    List<ui.Image>? images,
+    required List<ui.Image>? images,
   }) =>
       openFuture(
         getFilePath,
@@ -1063,6 +821,7 @@ class PdfViewerState extends State<PdfImageViewer> with SingleTickerProviderStat
   Timer? _realSizeUpdateTimer;
   Size? _docSize;
   final Map<int, double> _visiblePages = <int, double>{};
+  TapDownDetails? _doubleTapDetails;
 
   late AnimationController _animController;
   Animation<Matrix4>? _animGoTo;
@@ -1170,24 +929,42 @@ class PdfViewerState extends State<PdfImageViewer> with SingleTickerProviderStat
         final viewSize = Size(constraints.maxWidth, constraints.maxHeight);
         _relayout(viewSize);
         final docSize = _docSize ?? const Size(10, 10); // dummy size
-        return InteractiveViewer(
-          transformationController: _controller,
-          constrained: false,
-          panAxis: widget.params?.panAxis ?? PanAxis.free,
-          boundaryMargin: widget.params?.boundaryMargin ?? EdgeInsets.zero,
-          minScale: widget.params?.minScale ?? 0.8,
-          maxScale: widget.params?.maxScale ?? 2.5,
-          onInteractionEnd: widget.params?.onInteractionEnd,
-          onInteractionStart: widget.params?.onInteractionStart,
-          onInteractionUpdate: widget.params?.onInteractionUpdate,
-          panEnabled: widget.params?.panEnabled ?? true,
-          scaleEnabled: widget.params?.scaleEnabled ?? true,
-          interactionEndFrictionCoefficient: widget.params?.interactionEndFrictionCoefficient ?? 0.0000135,
-          child: Stack(
-            children: <Widget>[
-              SizedBox(width: docSize.width, height: docSize.height),
-              ...iterateLaidOutPages(viewSize)
-            ],
+        return GestureDetector(
+          onDoubleTapDown: (details) => _doubleTapDetails = details,
+          onDoubleTap: () {
+            if (widget.viewerController != null) {
+              if (widget.viewerController!.zoomRatio < (widget.params?.maxScale ?? 3)) {
+                widget.viewerController!.ready?.setZoomRatio(
+                  zoomRatio: widget.viewerController!.zoomRatio * 2,
+                  center: _doubleTapDetails!.localPosition,
+                );
+              } else {
+                widget.viewerController!.ready?.setZoomRatio(
+                  zoomRatio: 1,
+                  center: _doubleTapDetails!.localPosition,
+                );
+              }
+            }
+          },
+          child: InteractiveViewer(
+            transformationController: _controller,
+            constrained: false,
+            panAxis: widget.params?.panAxis ?? PanAxis.free,
+            boundaryMargin: widget.params?.boundaryMargin ?? EdgeInsets.zero,
+            minScale: widget.params?.minScale ?? 1,
+            maxScale: widget.params?.maxScale ?? 3,
+            onInteractionEnd: widget.params?.onInteractionEnd,
+            onInteractionStart: widget.params?.onInteractionStart,
+            onInteractionUpdate: widget.params?.onInteractionUpdate,
+            panEnabled: widget.params?.panEnabled ?? true,
+            scaleEnabled: widget.params?.scaleEnabled ?? true,
+            interactionEndFrictionCoefficient: widget.params?.interactionEndFrictionCoefficient ?? 0.0000135,
+            child: Stack(
+              children: <Widget>[
+                SizedBox(width: docSize.width, height: docSize.height),
+                ...iterateLaidOutPages(viewSize)
+              ],
+            ),
           ),
         );
       },
@@ -1312,7 +1089,7 @@ class PdfViewerState extends State<PdfImageViewer> with SingleTickerProviderStat
             child: Stack(children: [
               (widget.images!.isNotEmpty)
                   ? RawImage(
-                      filterQuality: FilterQuality.high,
+                      filterQuality: FilterQuality.none,
                       image: widget.images![page.pageNumber - 1],
                     )
                   : const Center(child: CircularProgressIndicator()),
@@ -1630,5 +1407,265 @@ class _PdfPageState {
     _releaseTextures(_PdfPageLoadingStatus.disposed);
     _previewNotifier.dispose();
     realSize.dispose();
+  }
+}
+
+/// Function definition to build widget tree for a PDF document.
+///
+/// [pdfDocument] is the PDF document and it is valid until the corresponding
+/// [PdfDocumentLoader] is in the widget tree. It may be null.
+/// [pageCount] indicates the number of pages in it.
+typedef PdfDocumentBuilder = Widget Function(BuildContext context, PdfDocument? pdfDocument, int pageCount);
+
+/// Function definition to build widget tree corresponding to a PDF page.
+///
+/// The function used to decorate the rendered PDF page with certain border and/or shadow
+/// and sometimes add page number on it.
+/// The second parameter [pageSize] is the original page size in pt.
+/// You can determine the final page size shown in the flutter UI using the size
+/// and then pass the size to [textureBuilder] function on the third parameter,
+/// which generates the final [Widget].
+typedef PdfPageBuilder = Widget Function(BuildContext context, PdfPageTextureBuilder textureBuilder, Size pageSize);
+
+/// Function definition to generate the actual widget that contains rendered PDF page image.
+///
+/// [size] should be the page widget size but it can be null if you don't want to calculate it.
+/// Unlike the function name, it may generate widget other than [Texture].
+/// the function generates a placeholder [Container] for the unavailable page image.
+/// Anyway, please note that the size is in screen coordinates; not the actual pixel size of
+/// the image. In other words, the function correctly deals with the screen pixel density automatically.
+/// [backgroundFill] specifies whether to fill background before rendering actual page content or not.
+/// The page content may not have background fill and if the flag is false, it may be rendered with transparent
+/// background.
+/// [allowAntialiasingIOS] specifies whether to allow use of antialiasing on iOS Quartz PDF rendering
+/// [renderingPixelRatio] specifies pixel density for rendering page image. If it is null, the value is obtained by
+/// calling `MediaQuery.of(context).devicePixelRatio`.
+/// Please note that on iOS Simulator, it always use non-[Texture] rendering pass.
+typedef PdfPageTextureBuilder = Widget Function(
+    {Size? size,
+    PdfPagePlaceholderBuilder? placeholderBuilder,
+    bool backgroundFill,
+    bool allowAntialiasingIOS,
+    double? renderingPixelRatio});
+
+/// Creates page placeholder that is shown on page loading or even page load failure.
+typedef PdfPagePlaceholderBuilder = Widget Function(Size size, PdfPageStatus status);
+
+/// Page loading status.
+enum PdfPageStatus {
+  /// The page is currently being loaded.
+  loading,
+
+  /// The page load failed.
+  loadFailed,
+}
+
+/// Error handler.
+typedef OnError = void Function(dynamic);
+
+/// Exception-proof await/cache mechanism on [PdfDocument] Future.
+class _PdfDocumentAwaiter {
+  _PdfDocumentAwaiter(this._docFuture, {this.onError});
+
+  final FutureOr<PdfDocument> _docFuture;
+  final OnError? onError;
+  PdfDocument? _cached;
+
+  Future<PdfDocument?> getValue() async {
+    if (_cached == null) {
+      try {
+        _cached = await _docFuture;
+      } catch (e) {
+        onError?.call(e);
+      }
+    }
+    return _cached;
+  }
+}
+
+/// [PdfDocumentLoader] is a [Widget] that used to load arbitrary PDF document and manages [PdfDocument] instance.
+class PdfDocumentLoader extends StatefulWidget {
+  final FutureOr<PdfDocument> doc;
+
+  /// Function to build widget tree corresponding to PDF document.
+  final PdfDocumentBuilder? documentBuilder;
+
+  /// Page number of the page to render if only one page should be shown.
+  ///
+  /// Could not be used with [documentBuilder].
+  /// If you want to show multiple pages in the widget tree, use [PdfPageView].
+  final int? pageNumber;
+
+  /// Function to build page widget tree.
+  ///
+  /// It can be null if you don't want to render the page with the widget or use the default page builder.
+  final PdfPageBuilder? pageBuilder;
+
+  /// Error callback
+  final Function(dynamic)? onError;
+
+  /// Load PDF document from file.
+  ///
+  /// For additional parameters, see [PdfDocumentLoader].
+  factory PdfDocumentLoader.openFile(
+    String filePath, {
+    Key? key,
+    PdfDocumentBuilder? documentBuilder,
+    int? pageNumber,
+    PdfPageBuilder? pageBuilder,
+    Function(dynamic)? onError,
+  }) =>
+      PdfDocumentLoader(
+        key: key,
+        doc: PdfDocument.openFile(filePath),
+        documentBuilder: documentBuilder,
+        pageNumber: pageNumber,
+        pageBuilder: pageBuilder,
+        onError: onError,
+      );
+
+  /// Load PDF document from asset.
+  ///
+  /// For additional parameters, see [PdfDocumentLoader].
+  factory PdfDocumentLoader.openAsset(
+    String assetName, {
+    Key? key,
+    PdfDocumentBuilder? documentBuilder,
+    int? pageNumber,
+    PdfPageBuilder? pageBuilder,
+    Function(dynamic)? onError,
+  }) =>
+      PdfDocumentLoader(
+        key: key,
+        doc: PdfDocument.openAsset(assetName),
+        documentBuilder: documentBuilder,
+        pageNumber: pageNumber,
+        pageBuilder: pageBuilder,
+        onError: onError,
+      );
+
+  /// Load PDF document from PDF binary data.
+  ///
+  /// For additional parameters, see [PdfDocumentLoader].
+  factory PdfDocumentLoader.openData(
+    Uint8List data, {
+    Key? key,
+    PdfDocumentBuilder? documentBuilder,
+    int? pageNumber,
+    PdfPageBuilder? pageBuilder,
+    Function(dynamic)? onError,
+  }) =>
+      PdfDocumentLoader(
+        key: key,
+        doc: PdfDocument.openData(data),
+        documentBuilder: documentBuilder,
+        pageNumber: pageNumber,
+        pageBuilder: pageBuilder,
+        onError: onError,
+      );
+
+  /// Use one of [PdfDocumentLoader.openFile], [PdfDocumentLoader.openAsset],
+  /// or [PdfDocumentLoader.openData] in normal case.
+  /// If you already have [PdfDocument], you can use the method.
+  PdfDocumentLoader({
+    Key? key,
+    required this.doc,
+    this.documentBuilder,
+    this.pageNumber,
+    this.pageBuilder,
+    this.onError,
+  }) : super(key: key);
+
+  @override
+  PdfDocumentLoaderState createState() => PdfDocumentLoaderState();
+
+  /// Error-safe wrapper on [doc].
+  late final _docCache = _PdfDocumentAwaiter(doc, onError: onError);
+}
+
+class PdfDocumentLoaderState extends State<PdfDocumentLoader> {
+  PdfDocument? _doc;
+
+  /// _lastPageSize is important to keep consistency on uniform page size on
+  /// a PDF document.
+  Size? _lastPageSize;
+  List<Size?>? _cachedPageSizes;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  void _setPageSize(int pageNumber, Size? size) {
+    _lastPageSize = size;
+    if (pageNumber > 0 && pageNumber <= _doc!.pageCount) {
+      if (_cachedPageSizes == null || _cachedPageSizes?.length != _doc!.pageCount) {
+        _cachedPageSizes = List<Size?>.filled(_doc!.pageCount, null);
+      }
+      _cachedPageSizes![pageNumber - 1] = size;
+    }
+  }
+
+  Size? _getPageSize(int? pageNumber) {
+    Size? size;
+    if (_cachedPageSizes != null && pageNumber! > 0 && pageNumber <= _cachedPageSizes!.length) {
+      size = _cachedPageSizes![pageNumber - 1];
+    }
+    size ??= _lastPageSize;
+    return size;
+  }
+
+  @override
+  void didUpdateWidget(PdfDocumentLoader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateDoc();
+  }
+
+  Future<void> _updateDoc() async {
+    final newDoc = await widget._docCache.getValue();
+    if (newDoc != _doc) {
+      _release();
+      _init();
+    }
+  }
+
+  @override
+  void dispose() {
+    _release();
+    super.dispose();
+  }
+
+  Future<void> _init() async {
+    try {
+      _doc = await widget._docCache.getValue();
+      if (_doc == null) {
+        widget.onError?.call(ArgumentError('Cannot open the document'));
+      }
+    } catch (e) {
+      _doc = null;
+      widget.onError?.call(e);
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _release() {
+    _doc?.dispose();
+    _doc = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.pageNumber != null
+        ? PdfPageView(
+            pdfDocument: _doc,
+            pageNumber: widget.pageNumber,
+            pageBuilder: widget.pageBuilder,
+          )
+        : widget.documentBuilder != null
+            ? widget.documentBuilder!(context, _doc, _doc?.pageCount ?? 0)
+            : Container();
   }
 }

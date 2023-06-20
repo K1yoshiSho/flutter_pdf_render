@@ -1,7 +1,5 @@
 import 'dart:io';
 import 'dart:ui' as ui;
-import 'package:path_provider/path_provider.dart';
-import 'package:dio/dio.dart';
 // for checking whether running on Web or not
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
@@ -15,23 +13,23 @@ class MyApp extends StatefulWidget {
   const MyApp({Key? key}) : super(key: key);
 
   @override
-  _MyAppState createState() => _MyAppState();
+  State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
   final controller = PdfViewerController();
-  TapDownDetails? _doubleTapDetails;
+
   List<ui.Image> images = [];
   File? file;
 
   @override
   void initState() {
-    confertPdfToImages(
-            "http://lib.sseu.ru/sites/default/files/2017/01/primery_oformleniya_ssylok_v_dissertacii_gost_r_7.0.5-2008_bibliogr.ssylka_0.pdf")
+    PdfImageViewer.returnFileFromUrl(
+            url:
+                "http://lib.sseu.ru/sites/default/files/2017/01/primery_oformleniya_ssylok_v_dissertacii_gost_r_7.0.5-2008_bibliogr.ssylka_0.pdf")
         .then(
       (value) {
-        addToList(value);
-        setState(() {});
+        addPhotos(value);
       },
     );
     super.initState();
@@ -43,87 +41,43 @@ class _MyAppState extends State<MyApp> {
     super.dispose();
   }
 
-  Future<File> confertPdfToImages(String url) async {
-    Directory tempDir = await getApplicationDocumentsDirectory();
-    dynamic response = await Dio().get(
-      url,
-      onReceiveProgress: null,
-      options: Options(
-          responseType: ResponseType.bytes,
-          followRedirects: false,
-          validateStatus: (status) {
-            if (status != null) {
-              return status < 500;
-            } else {
-              return false;
-            }
-          }),
-    );
-    file = File("${tempDir.path}/temp.pdf");
-    var raf = file!.openSync(mode: FileMode.write);
-    raf.writeFromSync(response.data);
-    return file!;
-  }
-
-  void addToList(File file) async {
-    PdfDocument doc = await PdfDocument.openFile(file.path);
-
-    for (int i = 1; i <= doc.pageCount; i++) {
-      PdfPage page = await doc.getPage(i);
-      PdfPageImage pageImage = await page.render();
-      ui.Image image = await pageImage.createImageIfNotAvailable();
-      images.add(image);
-    }
+  addPhotos(File value) async {
+    images.addAll(await PdfImageViewer.returnListOfImages(value));
     setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
+    print(images.length);
     return MaterialApp(
       theme: ThemeData(useMaterial3: true),
       home: Scaffold(
         appBar: AppBar(
           title: ValueListenableBuilder<Matrix4>(
-              // The controller is compatible with ValueListenable<Matrix4> and you can receive notifications on scrolling and zooming of the view.
               valueListenable: controller,
               builder: (context, _, child) =>
                   Text(controller.isReady ? 'Page #${controller.currentPageNumber}' : 'Page -')),
         ),
         backgroundColor: Colors.grey.shade300,
-        body: GestureDetector(
-          // Supporting double-tap gesture on the viewer.
-          onDoubleTapDown: (details) => _doubleTapDetails = details,
-          onDoubleTap: () {
-            if (controller.zoomRatio < 5) {
-              controller.ready?.setZoomRatio(
-                zoomRatio: controller.zoomRatio * 2,
-                center: _doubleTapDetails!.localPosition,
-              );
-            } else {
-              controller.ready?.setZoomRatio(
-                zoomRatio: 1,
-                center: _doubleTapDetails!.localPosition,
-              );
-            }
-          },
-          child: images.isNotEmpty
-              // Networking sample using flutter_cache_manager
-              ? PdfImageViewer.openFutureFile(
-                  // Accepting function that returns Future<String> of PDF file path
-                  () async => (await DefaultCacheManager().getSingleFile(
-                          'http://lib.sseu.ru/sites/default/files/2017/01/primery_oformleniya_ssylok_v_dissertacii_gost_r_7.0.5-2008_bibliogr.ssylka_0.pdf'))
-                      .path,
-                  viewerController: controller,
-                  onError: (err) => print(err),
-                  params: const PdfViewerParams(
-                    padding: 10,
-                    minScale: 1.0,
-                    // scrollDirection: Axis.horizontal,
-                  ),
-                  images: images,
-                )
-              : const Center(child: CircularProgressIndicator()),
-        ),
+        body: images.isNotEmpty
+            // Networking sample using flutter_cache_manager
+            ? PdfImageViewer.openFutureFile(
+                // Accepting function that returns Future<String> of PDF file path
+                () async => (await DefaultCacheManager().getSingleFile(
+                        'http://lib.sseu.ru/sites/default/files/2017/01/primery_oformleniya_ssylok_v_dissertacii_gost_r_7.0.5-2008_bibliogr.ssylka_0.pdf'))
+                    .path,
+                viewerController: controller,
+                onError: (err) => print(err),
+                params: const PdfViewerParams(
+                  padding: 10,
+                  minScale: 1.0,
+
+                  maxScale: 3.0,
+                  // scrollDirection: Axis.horizontal,
+                ),
+                images: images,
+              )
+            : const Center(child: CircularProgressIndicator()),
         floatingActionButton: Column(
           mainAxisAlignment: MainAxisAlignment.end,
           children: <Widget>[
