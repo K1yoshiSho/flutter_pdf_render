@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
-
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:vector_math/vector_math_64.dart' as math64;
 
@@ -881,7 +881,7 @@ class PdfViewerParams {
 }
 
 /// A PDF viewer implementation with user interactive zooming support.
-class PdfViewer extends StatefulWidget {
+class PdfImageViewer extends StatefulWidget {
   /// PDF document instance.
   final FutureOr<PdfDocument> doc;
 
@@ -894,65 +894,74 @@ class PdfViewer extends StatefulWidget {
   /// Error handler.
   final OnError? onError;
 
+  final List<ui.Image>? images;
+
   /// Error-safe wrapper on [doc].
   late final _docCache = _PdfDocumentAwaiter(doc, onError: onError);
 
   Future<PdfDocument?> get _doc => _docCache.getValue();
 
-  PdfViewer({
+  PdfImageViewer({
     Key? key,
     required this.doc,
     this.viewerController,
     this.params,
     this.onError,
+    required this.images,
   }) : super(key: key);
 
   /// Open a file.
-  factory PdfViewer.openFile(
+  factory PdfImageViewer.openFile(
     String filePath, {
     Key? key,
     PdfViewerController? viewerController,
     PdfViewerParams? params,
     OnError? onError,
+    List<ui.Image>? images,
   }) =>
-      PdfViewer(
+      PdfImageViewer(
         key: key,
         doc: PdfDocument.openFile(filePath),
         viewerController: viewerController,
         params: params,
         onError: onError,
+        images: images,
       );
 
   /// Open an asset.
-  factory PdfViewer.openAsset(
+  factory PdfImageViewer.openAsset(
     String assetPath, {
     Key? key,
     PdfViewerController? viewerController,
     PdfViewerParams? params,
     OnError? onError,
+    List<ui.Image>? images,
   }) =>
-      PdfViewer(
+      PdfImageViewer(
         key: key,
         doc: PdfDocument.openAsset(assetPath),
         viewerController: viewerController,
         params: params,
         onError: onError,
+        images: images,
       );
 
   /// Open PDF data on byte array.
-  factory PdfViewer.openData(
+  factory PdfImageViewer.openData(
     Uint8List data, {
     Key? key,
     PdfViewerController? viewerController,
     PdfViewerParams? params,
     OnError? onError,
+    List<ui.Image>? images,
   }) =>
-      PdfViewer(
+      PdfImageViewer(
         key: key,
         doc: PdfDocument.openData(data),
         viewerController: viewerController,
         params: params,
         onError: onError,
+        images: images,
       );
 
   /// Open PDF from the filename returned by async function.
@@ -964,6 +973,7 @@ class PdfViewer extends StatefulWidget {
     OnError? onError,
     Widget Function(BuildContext)? loadingBannerBuilder,
     PdfDocument? docFallback,
+    List<ui.Image>? images,
   }) =>
       openFuture(
         getFilePath,
@@ -974,6 +984,7 @@ class PdfViewer extends StatefulWidget {
         onError: onError,
         loadingBannerBuilder: loadingBannerBuilder,
         docFallback: docFallback,
+        images: images,
       );
 
   /// Open PDF data on byte array returned by async function.
@@ -985,6 +996,7 @@ class PdfViewer extends StatefulWidget {
     OnError? onError,
     Widget Function(BuildContext)? loadingBannerBuilder,
     PdfDocument? docFallback,
+    List<ui.Image>? images,
   }) =>
       openFuture(
         getData,
@@ -995,6 +1007,7 @@ class PdfViewer extends StatefulWidget {
         onError: onError,
         loadingBannerBuilder: loadingBannerBuilder,
         docFallback: docFallback,
+        images: images,
       );
 
   /// Open PDF using async function.
@@ -1005,6 +1018,7 @@ class PdfViewer extends StatefulWidget {
     PdfViewerController? viewerController,
     PdfViewerParams? params,
     OnError? onError,
+    List<ui.Image>? images,
     Widget Function(BuildContext)? loadingBannerBuilder,
     PdfDocument? docFallback,
   }) =>
@@ -1014,20 +1028,22 @@ class PdfViewer extends StatefulWidget {
         builder: (context, snapshot) {
           final data = snapshot.data;
           if (data != null) {
-            return PdfViewer(
+            return PdfImageViewer(
               doc: futureToDocument(data),
               viewerController: viewerController,
               params: params,
               onError: onError,
+              images: images,
             );
           } else if (loadingBannerBuilder != null) {
             return Builder(builder: loadingBannerBuilder);
           } else if (docFallback != null) {
-            return PdfViewer(
+            return PdfImageViewer(
               doc: Future.value(docFallback),
               viewerController: viewerController,
               params: params,
               onError: onError,
+              images: images,
             );
           }
           return Container(); // ultimate fallback
@@ -1038,7 +1054,7 @@ class PdfViewer extends StatefulWidget {
   PdfViewerState createState() => PdfViewerState();
 }
 
-class PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMixin {
+class PdfViewerState extends State<PdfImageViewer> with SingleTickerProviderStateMixin {
   PdfDocument? _doc;
   List<_PdfPageState>? _pages;
   final _pendedPageDisposes = <_PdfPageState>[];
@@ -1059,17 +1075,29 @@ class PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMixi
   @override
   void initState() {
     super.initState();
+
     _animController = AnimationController(vsync: this, duration: const Duration(milliseconds: 200));
     _init();
   }
 
+  // void _addToList() async {
+  //   for (int i = 1; i <= _doc!.pageCount; i++) {
+  //     PdfPage page = await _doc!.getPage(i);
+
+  //     PdfPageImage pageImage = await page.render();
+  //     ui.Image image = await pageImage.createImageDetached();
+  //     _images.add(image);
+  //   }
+  //   setState(() {});
+  // }
+
   @override
-  void didUpdateWidget(PdfViewer oldWidget) {
+  void didUpdateWidget(PdfImageViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
     _checkUpdates(oldWidget);
   }
 
-  Future<void> _checkUpdates(PdfViewer oldWidget) async {
+  Future<void> _checkUpdates(PdfImageViewer oldWidget) async {
     if ((await widget._doc) != (await oldWidget._doc)) {
       _init();
     } else {
@@ -1282,23 +1310,30 @@ class PdfViewerState extends State<PdfViewer> with SingleTickerProviderStateMixi
                     color: Color.fromARGB(255, 250, 250, 250),
                     boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 4, offset: Offset(2, 2))]),
             child: Stack(children: [
-              ValueListenableBuilder<int>(
-                  valueListenable: page._previewNotifier,
-                  builder: (context, value, child) => page.preview != null
-                      ? Positioned.fill(child: PdfTexture(textureId: page.preview!.texId))
-                      : widget.params?.buildPagePlaceholder != null
-                          ? widget.params!.buildPagePlaceholder!(context, page.pageNumber, page.rect!)
-                          : Container()),
-              ValueListenableBuilder<_RealSize?>(
-                  valueListenable: page.realSize,
-                  builder: (context, realSize, child) => realSize != null
-                      ? Positioned(
-                          left: realSize.rect.left,
-                          top: realSize.rect.top,
-                          width: realSize.rect.width,
-                          height: realSize.rect.height,
-                          child: PdfTexture(textureId: realSize.texture.texId))
-                      : Container()),
+              (widget.images!.isNotEmpty)
+                  ? RawImage(
+                      filterQuality: FilterQuality.high,
+                      image: widget.images![page.pageNumber - 1],
+                    )
+                  : const Center(child: CircularProgressIndicator()),
+              // ValueListenableBuilder<int>(
+              //     valueListenable: page._previewNotifier,
+              //     builder: (context, value, child) => page.preview != null
+              //         ? Positioned.fill(child: PdfTexture(textureId: page.preview!.texId))
+              //         : widget.params?.buildPagePlaceholder != null
+              //             ? widget.params!.buildPagePlaceholder!(context, page.pageNumber, page.rect!)
+              //             : Container()),
+              // ValueListenableBuilder<_RealSize?>(
+              //   valueListenable: page.realSize,
+              //   builder: (context, realSize, child) => realSize != null
+              //       ? Positioned(
+              //           left: realSize.rect.left,
+              //           top: realSize.rect.top,
+              //           width: realSize.rect.width,
+              //           height: realSize.rect.height,
+              //           child: PdfTexture(textureId: realSize.texture.texId))
+              //       : Container(),
+              // ),
               if (widget.params?.buildPageOverlay != null)
                 widget.params!.buildPageOverlay!(context, page.pageNumber, page.rect!),
             ]),

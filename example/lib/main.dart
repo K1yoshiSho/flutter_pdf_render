@@ -1,10 +1,13 @@
 import 'dart:io';
-
+import 'dart:ui' as ui;
+import 'package:path_provider/path_provider.dart';
+import 'package:dio/dio.dart';
 // for checking whether running on Web or not
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:pdf_render/pdf_render.dart';
-import 'package:pdf_render/pdf_render_widgets.dart';
+
+import 'package:pdf_render/pdf_render_image.dart';
 
 void main(List<String> args) => runApp(const MyApp());
 
@@ -18,11 +21,60 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   final controller = PdfViewerController();
   TapDownDetails? _doubleTapDetails;
+  List<ui.Image> images = [];
+  File? file;
+
+  @override
+  void initState() {
+    confertPdfToImages(
+            "http://lib.sseu.ru/sites/default/files/2017/01/primery_oformleniya_ssylok_v_dissertacii_gost_r_7.0.5-2008_bibliogr.ssylka_0.pdf")
+        .then(
+      (value) {
+        addToList(value);
+        setState(() {});
+      },
+    );
+    super.initState();
+  }
 
   @override
   void dispose() {
     controller.dispose();
     super.dispose();
+  }
+
+  Future<File> confertPdfToImages(String url) async {
+    Directory tempDir = await getApplicationDocumentsDirectory();
+    dynamic response = await Dio().get(
+      url,
+      onReceiveProgress: null,
+      options: Options(
+          responseType: ResponseType.bytes,
+          followRedirects: false,
+          validateStatus: (status) {
+            if (status != null) {
+              return status < 500;
+            } else {
+              return false;
+            }
+          }),
+    );
+    file = File("${tempDir.path}/temp.pdf");
+    var raf = file!.openSync(mode: FileMode.write);
+    raf.writeFromSync(response.data);
+    return file!;
+  }
+
+  void addToList(File file) async {
+    PdfDocument doc = await PdfDocument.openFile(file.path);
+
+    for (int i = 1; i <= doc.pageCount; i++) {
+      PdfPage page = await doc.getPage(i);
+      PdfPageImage pageImage = await page.render();
+      ui.Image image = await pageImage.createImageIfNotAvailable();
+      images.add(image);
+    }
+    setState(() {});
   }
 
   @override
@@ -54,12 +106,13 @@ class _MyAppState extends State<MyApp> {
               );
             }
           },
-          child: Platform.isAndroid
+          child: images.isNotEmpty
               // Networking sample using flutter_cache_manager
-              ? PdfViewer.openFutureFile(
+              ? PdfImageViewer.openFutureFile(
                   // Accepting function that returns Future<String> of PDF file path
-                  () async =>
-                      (await DefaultCacheManager().getSingleFile('https://oadk.at.ua/Richard_Dokinz_gen.pdf')).path,
+                  () async => (await DefaultCacheManager().getSingleFile(
+                          'http://lib.sseu.ru/sites/default/files/2017/01/primery_oformleniya_ssylok_v_dissertacii_gost_r_7.0.5-2008_bibliogr.ssylka_0.pdf'))
+                      .path,
                   viewerController: controller,
                   onError: (err) => print(err),
                   params: const PdfViewerParams(
@@ -67,17 +120,9 @@ class _MyAppState extends State<MyApp> {
                     minScale: 1.0,
                     // scrollDirection: Axis.horizontal,
                   ),
+                  images: images,
                 )
-              : PdfViewer.openAsset(
-                  'assets/hello.pdf',
-                  viewerController: controller,
-                  onError: (err) => print(err),
-                  params: const PdfViewerParams(
-                    padding: 10,
-                    minScale: 1.0,
-                    // scrollDirection: Axis.horizontal,
-                  ),
-                ),
+              : const Center(child: CircularProgressIndicator()),
         ),
         floatingActionButton: Column(
           mainAxisAlignment: MainAxisAlignment.end,
