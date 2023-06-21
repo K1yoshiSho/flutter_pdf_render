@@ -20,7 +20,6 @@ class _MyAppState extends State<MyApp> {
   final controller = PdfViewerController();
 
   List<ui.Image> images = [];
-  File? file;
 
   @override
   void initState() {

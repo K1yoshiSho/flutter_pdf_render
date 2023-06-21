@@ -935,7 +935,7 @@ class PdfViewerState extends State<PdfImageViewer> with SingleTickerProviderStat
             if (widget.viewerController != null) {
               if (widget.viewerController!.zoomRatio < (widget.params?.maxScale ?? 3)) {
                 widget.viewerController!.ready?.setZoomRatio(
-                  zoomRatio: widget.viewerController!.zoomRatio * 2,
+                  zoomRatio: (widget.viewerController!.zoomRatio * 2) <= 3 ? widget.viewerController!.zoomRatio * 2 : 3,
                   center: _doubleTapDetails!.localPosition,
                 );
               } else {
@@ -1089,27 +1089,10 @@ class PdfViewerState extends State<PdfImageViewer> with SingleTickerProviderStat
             child: Stack(children: [
               (widget.images!.isNotEmpty)
                   ? RawImage(
-                      filterQuality: FilterQuality.none,
+                      filterQuality: FilterQuality.high,
                       image: widget.images![page.pageNumber - 1],
                     )
                   : const Center(child: CircularProgressIndicator()),
-              // ValueListenableBuilder<int>(
-              //     valueListenable: page._previewNotifier,
-              //     builder: (context, value, child) => page.preview != null
-              //         ? Positioned.fill(child: PdfTexture(textureId: page.preview!.texId))
-              //         : widget.params?.buildPagePlaceholder != null
-              //             ? widget.params!.buildPagePlaceholder!(context, page.pageNumber, page.rect!)
-              //             : Container()),
-              // ValueListenableBuilder<_RealSize?>(
-              //   valueListenable: page.realSize,
-              //   builder: (context, realSize, child) => realSize != null
-              //       ? Positioned(
-              //           left: realSize.rect.left,
-              //           top: realSize.rect.top,
-              //           width: realSize.rect.width,
-              //           height: realSize.rect.height,
-              //           child: PdfTexture(textureId: realSize.texture.texId))
-              //       : Container(),
               // ),
               if (widget.params?.buildPageOverlay != null)
                 widget.params!.buildPageOverlay!(context, page.pageNumber, page.rect!),
